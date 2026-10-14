@@ -1,0 +1,29 @@
+[workspace]
+members = [
+    "crates/audio-core",
+    "crates/audio-kernel",
+    "crates/audio-asio",
+    "crates/audio-native",
+    "crates/audio-control",
+    "crates/audio-bench",
+]
+resolver = "2"
+
+[workspace.package]
+version = "1.0.0"
+edition = "2021"
+authors = ["DolomiteAudio Team <technosharing@gmail.com>"]
+license = "MIT OR Apache-2.0"
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+overflow-checks = false
+debug = false
+strip = true
+
+[profile.dev]
+opt-level = 2
+debug = true

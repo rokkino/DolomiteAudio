@@ -1,0 +1,59 @@
+;
+; ZeroAudio.inf
+; Windows Driver Setup Information for ZeroLatency Rust Kernel Audio Driver
+;
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = MEDIA
+ClassGuid   = {4d36e96c-e325-11ce-bfc1-08002be10318}
+Provider    = %ManufacturerName%
+CatalogFile = ZeroAudio.cat
+DriverVer   = 10/14/2026,1.0.0.0
+PnpLockDown = 1
+
+[DestinationDirs]
+DefaultDestDir = 12 ; %windir%\system32\drivers
+ZeroAudio_Device_CoInstaller_CopyFiles = 11
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+audio_kernel.sys = 1,,
+audio_asio.dll   = 1,,
+
+;*****************************************
+; Install Section
+;*****************************************
+
+[Manufacturer]
+%ManufacturerName% = Standard,NTamd64
+
+[Standard.NTamd64]
+%ZeroAudio.DeviceDesc% = ZeroAudio_Device, Root\ZeroLatencyAudio
+
+[ZeroAudio_Device.NTamd64]
+CopyFiles = Drivers_Dir
+
+[Drivers_Dir]
+audio_kernel.sys
+
+;-------------- Service installation
+[ZeroAudio_Device.NTamd64.Services]
+AddService = ZeroLatencyAudio,%SPSVCINST_ASSOCSERVICE%, ZeroAudio_Service_Inst
+
+; -------------- ZeroAudio driver install sections
+[ZeroAudio_Service_Inst]
+DisplayName    = %ZeroAudio.SVCDESC%
+ServiceType    = 1               ; SERVICE_KERNEL_DRIVER
+StartType      = 3               ; SERVICE_DEMAND_START
+ErrorControl   = 1               ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %12%\audio_kernel.sys
+
+[Strings]
+SPSVCINST_ASSOCSERVICE = 0x00000002
+ManufacturerName       = "ZeroLatency Audio Technologies"
+DiskName               = "ZeroAudio Installation Disk"
+ZeroAudio.DeviceDesc   = "ZeroLatency Rust Kernel Audio Device"
+ZeroAudio.SVCDESC      = "ZeroLatency Kernel Audio Service"

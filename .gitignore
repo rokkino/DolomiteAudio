@@ -1,0 +1,22 @@
+# Rust Build Artifacts
+/target/
+**/*.rs.bk
+*.pdb
+
+# IDE and Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Temporary and Scratch files
+scratch/
+*.log
+*.tmp
+*.cer
+*.pfx
+
+# Except generated documentation assets
+!assets/*.jpg
+!assets/*.png

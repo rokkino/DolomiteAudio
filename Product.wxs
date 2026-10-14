@@ -1,0 +1,81 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <!-- ZeroLatency Audio Driver - Production MSI Installer Definition -->
+  <Package Name="ZeroLatency Rust Kernel Audio Driver Suite" Language="1033" Version="1.0.0.0" Manufacturer="ZeroLatency Audio Technologies" UpgradeCode="4D9B51E2-9F1A-4C2E-8A33-72C80DFB1234"><SummaryInformation Description="Ultra-Low Latency Kernel Audio Driver and ASIO Interface" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of ZeroLatency Audio is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <!-- Directory Structure -->
+    
+
+    <!-- Custom Actions: Driver PnP and Certificate Installation -->
+    <CustomAction Id="CA_InstallCert" Directory="INSTALLFOLDER" ExeCommand="certutil.exe -addstore -f &quot;TrustedPublisher&quot; &quot;[INSTALLFOLDER]ZeroLatencyAudioCA.cer&quot;" Execute="deferred" Return="ignore" Impersonate="no" />
+
+    <CustomAction Id="CA_InstallPnpDriver" Directory="INSTALLFOLDER" ExeCommand="pnputil.exe -i -a &quot;[INSTALLFOLDER]ZeroAudio.inf&quot;" Execute="deferred" Return="ignore" Impersonate="no" />
+
+    <InstallExecuteSequence>
+      <Custom Action="CA_InstallCert" After="InstallFiles" Condition="NOT Installed" />
+      <Custom Action="CA_InstallPnpDriver" After="CA_InstallCert" Condition="NOT Installed" />
+    </InstallExecuteSequence>
+
+    <!-- Features -->
+    <Feature Id="MainFeature" Title="ZeroLatency Audio Core Driver Suite" Level="1">
+      <ComponentRef Id="C_AudioAsioDll" />
+      <ComponentRef Id="C_AudioControlExe" />
+      <ComponentRef Id="C_AudioBenchExe" />
+      <ComponentRef Id="C_DriverInf" />
+      <ComponentRef Id="C_DriverCert" />
+      <ComponentRef Id="C_AudioKernelSys" />
+    </Feature>
+  
+      <!-- Program Files Directory -->
+      <StandardDirectory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="ZeroAudio">
+          <Component Id="C_AudioAsioDll" Guid="B1E23456-789A-BCDE-F012-3456789ABC01" Bitness="always64">
+            <File Id="F_audio_asio_dll" Source="target\release\audio_asio.dll" KeyPath="yes" />
+            
+            <!-- ASIO Registration in 64-bit Registry -->
+            <RegistryKey Root="HKLM" Key="SOFTWARE\ASIO\ZeroLatency Audio">
+              <RegistryValue Type="string" Name="CLSID" Value="{3E8C1234-A789-4B56-9DEF-0123456789AB}" />
+              <RegistryValue Type="string" Name="Description" Value="ZeroLatency Rust Kernel ASIO (Sub-Nanosecond Direct)" />
+            </RegistryKey>
+
+            <!-- COM InprocServer32 Registration -->
+            <RegistryKey Root="HKLM" Key="SOFTWARE\Classes\CLSID\{3E8C1234-A789-4B56-9DEF-0123456789AB}\InprocServer32">
+              <RegistryValue Type="string" Value="[INSTALLFOLDER]audio_asio.dll" />
+              <RegistryValue Type="string" Name="ThreadingModel" Value="Both" />
+            </RegistryKey>
+          </Component>
+
+          <Component Id="C_AudioControlExe" Guid="B1E23456-789A-BCDE-F012-3456789ABC02" Bitness="always64">
+            <File Id="F_audio_control_exe" Source="target\release\audio-control.exe" KeyPath="yes" />
+            <!-- Shortcut in Start Menu -->
+            <Shortcut Id="S_AudioControl" Directory="ProgramMenuFolder" Name="ZeroLatency Audio Control Panel" WorkingDirectory="INSTALLFOLDER" Advertise="yes" />
+          </Component>
+
+          <Component Id="C_AudioBenchExe" Guid="B1E23456-789A-BCDE-F012-3456789ABC03" Bitness="always64">
+            <File Id="F_audio_bench_exe" Source="target\release\audio-bench.exe" KeyPath="yes" />
+          </Component>
+
+          <Component Id="C_DriverInf" Guid="B1E23456-789A-BCDE-F012-3456789ABC04" Bitness="always64">
+            <File Id="F_ZeroAudio_inf" Source="ZeroAudio.inf" KeyPath="yes" />
+          </Component>
+
+          <Component Id="C_DriverCert" Guid="B1E23456-789A-BCDE-F012-3456789ABC05" Bitness="always64">
+            <File Id="F_ZeroAudio_cer" Source="ZeroLatencyAudioCA.cer" KeyPath="yes" />
+          </Component>
+        </Directory>
+      </StandardDirectory>
+
+      <!-- System32 Drivers Directory for Kernel Driver -->
+      <StandardDirectory Id="System64Folder">
+        <Directory Id="DriversFolder" Name="drivers">
+          <Component Id="C_AudioKernelSys" Guid="B1E23456-789A-BCDE-F012-3456789ABC06" Bitness="always64">
+            <File Id="F_audio_kernel_sys" Source="target\release\audio_kernel.sys" KeyPath="yes" />
+          </Component>
+        </Directory>
+      </StandardDirectory>
+
+      <StandardDirectory Id="ProgramMenuFolder" />
+    </Package>
+</Wix>
