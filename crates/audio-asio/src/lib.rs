@@ -6,12 +6,12 @@ pub mod kernel_client;
 pub mod asio_driver;
 pub mod com_interface;
 pub mod registry;
+pub mod wasapi;
+pub mod live_status;
 
 use core::ffi::c_void;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicPtr, Ordering};
-use crate::com_interface::{IASIO, ASIO_VTBL, CLSID_ZERO_LATENCY_AUDIO};
-use crate::asio_driver::AsioDriverState;
+use crate::com_interface::{IASIO, CLSID_ZERO_LATENCY_AUDIO};
 
 type HRESULT = i32;
 const S_OK: HRESULT = 0;
@@ -92,11 +92,10 @@ extern "system" fn factory_create_instance(
         return E_POINTER;
     }
 
-    let asio_instance = Box::new(IASIO {
-        vtbl: &ASIO_VTBL,
-        ref_count: 1,
-        state: Mutex::new(AsioDriverState::new()),
-    });
+    if !_p_unk_outer.is_null() {
+        return -2147221232; // CLASS_E_NOAGGREGATION
+    }
+    let asio_instance = IASIO::new_boxed();
 
     unsafe {
         *ppv_object = Box::into_raw(asio_instance) as *mut c_void;
@@ -106,6 +105,26 @@ extern "system" fn factory_create_instance(
 
 extern "system" fn factory_lock_server(_this: *mut IClassFactory, _f_lock: i32) -> HRESULT {
     S_OK
+}
+
+#[link(name = "kernel32")]
+extern "system" {
+    fn GetModuleFileNameW(h: *mut c_void, buf: *mut u16, size: u32) -> u32;
+}
+
+/// Directory containing audio_asio.dll (used to find audio-control.exe).
+pub fn module_dir() -> Option<std::path::PathBuf> {
+    let h = MODULE_HANDLE.load(Ordering::SeqCst);
+    if h.is_null() {
+        return None;
+    }
+    let mut buf = [0u16; 1024];
+    let n = unsafe { GetModuleFileNameW(h, buf.as_mut_ptr(), buf.len() as u32) } as usize;
+    if n == 0 || n >= buf.len() {
+        return None;
+    }
+    let path = std::path::PathBuf::from(String::from_utf16_lossy(&buf[..n]));
+    path.parent().map(|p| p.to_path_buf())
 }
 
 #[no_mangle]

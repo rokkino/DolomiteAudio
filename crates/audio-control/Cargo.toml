@@ -11,3 +11,4 @@ path = "src/main.rs"
 [dependencies]
 audio-core = { path = "../audio-core" }
 audio-native = { path = "../audio-native" }
+audio-asio = { path = "../audio-asio" }

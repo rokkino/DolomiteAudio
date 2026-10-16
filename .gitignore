@@ -20,3 +20,9 @@ scratch/
 # Except generated documentation assets
 !assets/*.jpg
 !assets/*.png
+
+# local test output
+*.wav
+probe.bat
+dist/
+portable/

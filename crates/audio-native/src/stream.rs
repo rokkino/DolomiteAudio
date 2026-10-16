@@ -47,6 +47,7 @@ extern "system" {
     ) -> *mut c_void;
     fn WaitForSingleObject(hHandle: *mut c_void, dwMilliseconds: u32) -> u32;
     fn SetThreadAffinityMask(hThread: *mut c_void, dwThreadAffinityMask: usize) -> usize;
+    fn SetThreadPriority(hThread: *mut c_void, nPriority: i32) -> i32;
     fn GetCurrentThread() -> *mut c_void;
 }
 
@@ -281,24 +282,32 @@ impl ZeroAudioStream {
                     // Dynamic MMCSS Pro Audio Registration
                     let mmcss_info = enable_mmcss();
 
-                    // P-Core Pinning (Core 2)
+                    // Set Thread Priority to TIME_CRITICAL (15) inside MMCSS Pro Audio
                     let current_thread = GetCurrentThread();
+                    SetThreadPriority(current_thread, 15);
+
+                    // Pin Thread Affinity to Core 2 (P-Core / Zen 4 isolated core)
                     SetThreadAffinityMask(current_thread, 0x04);
 
-                    // Disable Windows Power Throttling / Intel Thread Director downclocking
+                    // Disable Windows Power Throttling / CPU core downclocking
                     disable_power_throttling(current_thread);
 
                     let mem = &mut *(shared_mem_ptr as *mut SharedAudioMemory);
-                    let quantum = mem.config.quantum_frames as usize;
+                    let quantum = (mem.config.quantum_frames as usize).clamp(16, 512);
+                    let sample_rate = mem.config.sample_rate;
 
+                    let mut pacer = audio_core::AudioClockPacer::new(sample_rate, quantum as u32);
                     let mut in_buffer = vec![AudioFrame::EMPTY; quantum];
                     let mut out_buffer = vec![AudioFrame::EMPTY; quantum];
 
                     while is_running.load(Ordering::Relaxed) {
                         if event_handle != 0 {
-                            WaitForSingleObject(event_handle as *mut c_void, 2);
+                            WaitForSingleObject(event_handle as *mut c_void, 1);
                         } else {
-                            core::hint::spin_loop();
+                            let tick_info = pacer.wait_next_tick();
+                            if tick_info.is_dpc_spike {
+                                mem.telemetry.last_dpc_cycles.store(audio_core::read_cpu_timestamp(), Ordering::Relaxed);
+                            }
                         }
 
                         // Read input slice from capture ring

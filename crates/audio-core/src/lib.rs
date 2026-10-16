@@ -6,6 +6,7 @@ pub mod ioctl;
 pub mod simd;
 pub mod dsp;
 pub mod timecode;
+pub mod clock;
 
 pub use ring_buffer::*;
 pub use shared_mem::*;
@@ -13,3 +14,4 @@ pub use ioctl::*;
 pub use simd::*;
 pub use dsp::*;
 pub use timecode::*;
+pub use clock::*;

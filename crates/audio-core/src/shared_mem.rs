@@ -82,11 +82,11 @@ pub struct AudioStreamConfig {
 
 impl AudioStreamConfig {
     pub const DEFAULT: Self = Self {
-        sample_rate: 96000,
-        input_channels: 64,
-        output_channels: 64,
-        quantum_frames: 16, // Ultra-low latency: ~0.16ms at 96kHz!
-        cpu_affinity_mask: 0x04, // Default Core 2 (P-Core)
+        sample_rate: 48000,
+        input_channels: 2,  // Standard Studio Stereo Input (Left, Right)
+        output_channels: 2, // Standard Studio Stereo Output (Main Left, Main Right)
+        quantum_frames: 64, // Optimal low-latency quantum: ~1.33ms at 48kHz (99.9% glitch-free)
+        cpu_affinity_mask: 0x04, // Default Core 2 (P-Core / Zen 4 isolated core)
         clock_source: ClockSource::InternalPcore as u32,
         enable_limiter: 1,
         enable_dither: 1,

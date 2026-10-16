@@ -13,3 +13,7 @@ pub use resampler::*;
 pub use metering::*;
 pub use matrix::*;
 pub use clock_servo::*;
+#[cfg(feature = "std")]
+pub mod stream_resampler;
+#[cfg(feature = "std")]
+pub use stream_resampler::{Phase as ResamplerPhase, StreamResampler};

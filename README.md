@@ -14,6 +14,24 @@
 
 ---
 
+## ⬇️ Download
+
+**[Get the latest installer from Releases](https://github.com/rokkino/DolomiteAudio/releases/latest)** → run `DolomiteAudioRT-Setup-*.exe` → in your DAW pick **DolomiteAudioRT** as the ASIO device.
+
+| Engine | What it does | Typical output latency @48 kHz |
+| :--- | :--- | :--- |
+| Compatible | Windows shared mixer, 10 ms periods | ~15–25 ms |
+| Low latency | IAudioClient3 minimum shared period, other apps keep playing | depends on the sound driver |
+| Exclusive | WASAPI exclusive output **and input**, minimum hardware period, ping-pong buffers | lowest (a few ms) |
+
+**Auto-exclusive (default with *Exclusive*)**: the driver holds the sound card exclusively only while your DAW is in front. Switch to another program, or let another app play audio, and it drops to shared mode within ~150 ms so everything is audible; come back to the DAW and it re-takes exclusive mode after ~1 s of quiet. No DAW restart, no reset.
+
+**Tray panel**: a small icon next to the clock. Left click opens a compact panel (latency, meters, engine, buffer, devices); click anywhere else and it hides. Right click: test sound, *Start with Windows*, exit.
+
+Run `asio_selftest.exe --list` (installed next to the driver) to see your devices; `--engine auto|exclusive|low|shared` to test an engine.
+
+---
+
 ## ⚡ Overview
 
 **DolomiteAudio** is a ground-up reimagining of professional digital audio on Microsoft Windows. For three decades, the pro-audio ecosystem has relied on Steinberg ASIO and C++ kernel streaming drivers with deep double-buffering, high context-switching overhead, and rigid single-application exclusivity.
