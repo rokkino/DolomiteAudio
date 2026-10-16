@@ -56,7 +56,7 @@ Name: "{group}\Uninstall DolomiteAudio"; Filename: "{uninstallexe}"
 ; remove registrations left by older builds
 Root: HKLM64; Subkey: "SOFTWARE\ASIO\ZeroLatency Audio"; Flags: deletekey
 Root: HKLM64; Subkey: "SOFTWARE\ASIO\ZeroLatency Rust Kernel ASIO"; Flags: deletekey
-; ASIO driver list (what Studio One / Cubase / Reaper read)
+; ASIO driver list (read by every ASIO host)
 Root: HKLM64; Subkey: "SOFTWARE\ASIO\{#MyAppName}"; ValueType: string; ValueName: "CLSID"; ValueData: "{#MyClsid}"; Flags: uninsdeletekey
 Root: HKLM64; Subkey: "SOFTWARE\ASIO\{#MyAppName}"; ValueType: string; ValueName: "Description"; ValueData: "{#MyAppName}"
 ; COM in-proc server

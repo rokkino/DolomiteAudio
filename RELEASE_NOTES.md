@@ -1,10 +1,10 @@
 ## DolomiteAudioRT 2.1 — exclusive input, auto-release, tray panel
 
-**Download:** `DolomiteAudioRT-Setup-*.exe` below → run it → in Studio One open *Options › Audio Setup* and pick **DolomiteAudioRT**. The panel lives in the tray icon next to the clock.
+**Download:** `DolomiteAudioRT-Setup-*.exe` below → run it → in your DAW's audio settings pick **DolomiteAudioRT** as the ASIO device (Studio One, Cubase, Reaper, Ableton Live, FL Studio, Bitwig…). The panel lives in the tray icon next to the clock.
 
 ### New
 - **Exclusive capture**: inputs now record from your sound card (they were silent before). In *Exclusive* mode input and output both run at the minimum hardware period, so round-trip latency drops the same way.
-- **Auto-exclusive**: exclusive mode is released within ~150 ms when you switch to another program or another app starts playing, and re-acquired ~1 s after you return to the DAW. Switching happens live inside the driver (no ASIO reset), and if the card is busy the driver backs off and retries.
+- **Auto-exclusive**: exclusive mode is released within ~150 ms when you switch to another program or another app starts playing, and re-acquired ~1 s after you return to the DAW. Switching happens live inside the driver (no ASIO reset, works with any ASIO host), and if the card is busy the driver backs off and retries.
 - **Tray panel**: compact flyout that opens and closes from the notification-area icon (it hides itself when you click elsewhere, or pin it). The icon colour shows the state: green = exclusive, blue = shared, red = dropout. Optional *Start with Windows*.
 - **Minimum-phase sample-rate converter**: the converter's own delay drops from 16 to ~2.4 frames at the same quality (THD+N ≈ −102 dB). It's only used when the DAW and sound card rates differ.
 - **Recommended buffer**: the panel marks the smallest DAW buffer that matches your card's period.

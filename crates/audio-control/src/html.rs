@@ -185,7 +185,7 @@ pub const INDEX_HTML: &str = r##"<!DOCTYPE html>
       </div>
       <div class="where" id="where">–</div>
     </div>
-    <p class="empty">Nessun programma usa il driver. In Studio One: <b>Opzioni › Configurazione audio</b> → <b>DolomiteAudioRT</b>.</p>
+    <p class="empty">Nessun programma usa il driver. Nelle impostazioni audio della tua DAW scegli <b>DolomiteAudioRT</b> come dispositivo ASIO.</p>
   </section>
 
   <section class="card auto" id="auto" hidden>
@@ -221,7 +221,7 @@ pub const INDEX_HTML: &str = r##"<!DOCTYPE html>
     <summary><span class="t">Buffer</span><span class="v" id="vBuf"></span></summary>
     <div class="body">
       <div class="seg" id="bufSeg"></div>
-      <p class="hint" id="bufHint">Studio One può cambiarlo in Configurazione audio › Dimensione blocco.</p>
+      <p class="hint" id="bufHint">La DAW può cambiarlo nelle sue impostazioni audio.</p>
     </div>
   </details>
 
@@ -321,8 +321,8 @@ function renderSettings() {
   segmented($('bufSeg'), BUFFERS, cfg.buffer_size, v => v, v => save({ buffer_size: v }, 'Buffer preferito: ' + v), rec);
   $('vBuf').textContent = cfg.buffer_size + ' campioni';
   $('bufHint').textContent = rec
-    ? `Consigliato ${rec} (periodo della scheda ${last.period}). Studio One può cambiarlo in Configurazione audio.`
-    : 'Studio One può cambiarlo in Configurazione audio › Dimensione blocco.';
+    ? `Consigliato ${rec} (periodo della scheda ${last.period}). La DAW può cambiarlo nelle sue impostazioni audio.`
+    : 'La DAW può cambiarlo nelle sue impostazioni audio.';
 
   fillSelect($('outSel'), devs.outputs, cfg.output_device, 'Predefinito di Windows');
   $('vOut').textContent = nameOf(devs.outputs, cfg.output_device, 'Predefinito di Windows');
@@ -402,9 +402,7 @@ function render(s) {
     $('lgRsWrap').hidden = !s.resampling;
     $('lgRs').textContent = `${fmtMs(ms(rsFrames, rate))} ms`;
     const w = $('where');
-    w.innerHTML = '';
-    const b = document.createElement('b'); b.textContent = s.host || 'DAW';
-    w.append(b, ' → ' + s.device + (s.in_mode ? '  ·  in: ' + s.in_device : ''));
+    w.textContent = s.device + (s.in_mode ? '  ·  in: ' + s.in_device : '');
     w.title = w.textContent;
 
     $('stRate').textContent = s.resampling ? `${khz(s.daw_rate)}→${khz(s.device_rate)}` : `${khz(rate)} kHz`;
