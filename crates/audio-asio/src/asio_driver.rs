@@ -25,7 +25,7 @@ use crate::asio_types::*;
 use crate::kernel_client::KernelAudioClient;
 use crate::live_status::{LiveStatus, LiveStatusMap};
 use crate::wasapi::{audible_sessions, ComGuard, DolomiteConfig, Engine, WasapiCapture, WasapiRender, AUDCLNT_E_DEVICE_INVALIDATED};
-use audio_core::{ResamplerPhase, StreamResampler, MAX_AUDIO_CHANNELS};
+use audio_core::{DriftLoop, ResamplerPhase, StreamResampler, MAX_AUDIO_CHANNELS};
 
 #[derive(Copy, Clone)]
 pub struct SendPtr(pub *mut f32);
@@ -65,8 +65,6 @@ pub fn log_debug(msg: &str) {
 
 #[link(name = "winmm")]
 extern "system" {
-    fn timeBeginPeriod(uPeriod: u32) -> u32;
-    fn timeEndPeriod(uPeriod: u32) -> u32;
     fn timeGetTime() -> u32;
 }
 
@@ -77,7 +75,6 @@ extern "system" {
     fn FreeLibrary(hLibModule: *mut c_void) -> i32;
     fn SetThreadPriority(hThread: *mut c_void, nPriority: i32) -> i32;
     fn GetCurrentThread() -> *mut c_void;
-    fn Sleep(dwMilliseconds: u32);
     fn QueryPerformanceCounter(lpPerformanceCount: *mut i64) -> i32;
     fn QueryPerformanceFrequency(lpFrequency: *mut i64) -> i32;
 }
@@ -90,6 +87,12 @@ fn qpc() -> i64 {
     let mut v = 0i64;
     unsafe { QueryPerformanceCounter(&mut v) };
     v
+}
+
+/// QPC in 100 ns units -- the time base WASAPI uses for capture timestamps.
+fn qpc_100ns() -> u64 {
+    let f = qpc_freq().max(1) as u128;
+    (qpc().max(0) as u128 * 10_000_000 / f) as u64
 }
 
 fn qpc_freq() -> i64 {
@@ -305,6 +308,7 @@ impl AsioDriverState {
         // Pre-build min-phase resampler kernels off the audio thread.
         let rate = self.sample_rate;
         let _ = thread::Builder::new().name("DolomiteKernelPrewarm".into()).spawn(move || {
+            StreamResampler::prewarm(rate, rate, ResamplerPhase::Minimum);
             for dev in [44100.0, 48000.0, 88200.0, 96000.0] {
                 if (dev - rate).abs() > 0.5 {
                     StreamResampler::prewarm(rate, dev, ResamplerPhase::Minimum);
@@ -517,6 +521,7 @@ fn policy_thread(policy: Arc<Policy>, cfg_rx: Arc<std::sync::Mutex<DolomiteConfi
     let mut last_other: i64 = i64::MIN / 2;
     let mut last_probe: i64 = 0;
     let mut backoff_until: i64 = 0;
+    let timer = crate::hrtimer::HrTimer::new();
 
     while !policy.stop.load(Ordering::Relaxed) {
         policy.log.drain();
@@ -577,7 +582,8 @@ fn policy_thread(policy: Arc<Policy>, cfg_rx: Arc<std::sync::Mutex<DolomiteConfi
         };
         policy.desired.store(desired, Ordering::Relaxed);
         policy.state.store(state, Ordering::Relaxed);
-        thread::sleep(std::time::Duration::from_millis(40));
+        // 20 ms tick, precise even while the DAW window is minimised
+        timer.sleep_ms(20);
     }
     policy.log.drain();
 }
@@ -628,10 +634,20 @@ impl Meters {
     }
 }
 
-/// Input side: capture device -> (resampler) -> DAW-rate FIFO.
+/// Input side: capture device -> adaptive resampler -> DAW-rate FIFO.
+///
+/// The output device clocks the ASIO callbacks; the capture device runs on
+/// its own crystal (always a different endpoint, often a different card).
+/// Instead of dropping/repeating samples when the two drift apart, the
+/// resampling ratio is servo-controlled (Adriaensen DLL, see
+/// `audio_core::DriftLoop`) so the FIFO delay -- and the input latency --
+/// stays constant and the audio is never cut.
 struct InputChain {
     dev: WasapiCapture,
-    rs: Option<StreamResampler>,
+    rs: StreamResampler,
+    drift: Option<DriftLoop>,
+    in_rate: f64,
+    daw_rate: f64,
     scratch_l: Vec<f32>,
     scratch_r: Vec<f32>,
     fifo: VecDeque<(f32, f32)>,
@@ -662,25 +678,42 @@ impl InputChain {
             return;
         }
         let fifo = &mut self.fifo;
-        match self.rs.as_mut() {
-            Some(rs) => {
-                for (l, r) in self.scratch_l.chunks(1024).zip(self.scratch_r.chunks(1024)) {
-                    rs.process(l, r, |a, b| fifo.push_back((a, b)));
-                }
-            }
-            None => {
-                for (&l, &r) in self.scratch_l.iter().zip(self.scratch_r.iter()) {
-                    fifo.push_back((l, r));
-                }
-            }
+        let rs = &mut self.rs;
+        for (l, r) in self.scratch_l.chunks(1024).zip(self.scratch_r.chunks(1024)) {
+            rs.process(l, r, |a, b| fifo.push_back((a, b)));
         }
-        // Clock drift / scheduling burst: never let the input lag grow.
-        let limit = block + self.cushion + self.period_daw * 2;
+        // Emergency only (scheduling stall, device burst): the adaptive loop
+        // handles clock drift, so this should never fire in normal use.
+        let limit = block + self.cushion + self.period_daw * 6 + 256;
         if self.fifo.len() > limit {
-            let drop = self.fifo.len() - (block + self.cushion);
+            let drop = self.fifo.len() - (block + self.cushion + self.period_daw / 2);
             self.fifo.drain(..drop);
+            if let Some(d) = self.drift.as_mut() {
+                // keep the learned ratio, restart from the set point
+                let t = d.target();
+                let corr = d.correction();
+                *d = DriftLoop::new(t, block, self.daw_rate);
+                let _ = corr;
+            }
             log.push(EV_IN_OVERRUN, drop as u32);
         }
+    }
+
+    /// Delay held between capture and the DAW, in DAW frames, corrected for
+    /// the time elapsed since the last capture packet (continuous estimate).
+    fn measured_delay(&self, now_100ns: u64) -> f64 {
+        let mut d = self.fifo.len() as f64 + self.rs.pending_input_frames() * self.rs.ratio();
+        let last = self.dev.last_frame_100ns;
+        if last != 0 && now_100ns > last {
+            let max = 2.0 * self.period_daw as f64 / self.daw_rate * 1e7;
+            let dt = ((now_100ns - last) as f64).min(max);
+            d += dt * 1e-7 * self.in_rate * self.rs.ratio();
+        }
+        d
+    }
+
+    fn set_point(&self, block: usize) -> f64 {
+        (block + self.cushion + self.period_daw / 2) as f64
     }
 }
 
@@ -716,6 +749,24 @@ impl Pump {
         } else if let Some(inp) = self.input.as_mut() {
             if !inp.primed && inp.fifo.len() >= block + inp.cushion {
                 inp.primed = true;
+                let sp = inp.set_point(block);
+                match inp.drift.as_mut() {
+                    Some(d) => d.set_target(sp),
+                    None => inp.drift = Some(DriftLoop::new(sp, block, self.ctx.daw_rate)),
+                }
+            }
+            if inp.primed {
+                let now = qpc_100ns();
+                let delay = inp.measured_delay(now);
+                if let Some(d) = inp.drift.as_mut() {
+                    let corr = d.update(delay);
+                    inp.rs.set_ratio_correction(corr);
+                    if let Some(l) = &self.ctx.live {
+                        let s = l.get();
+                        s.input_adaptive.store(if d.locked() { 2 } else { 1 }, Ordering::Relaxed);
+                        s.input_drift_ppb.store((d.drift_ppm() * 1000.0) as i32 as u32, Ordering::Relaxed);
+                    }
+                }
             }
             let have = if inp.primed { inp.fifo.len().min(block) } else { 0 };
             if inp.primed && have < block {
@@ -939,12 +990,10 @@ unsafe fn open_io(p: &mut Pump, engine: Engine, old: Option<Io>) -> Io {
         match WasapiCapture::open(Some(&cfg.input_device_id), in_engine, p.ctx.daw_rate as u32) {
             Ok(dev) => {
                 let in_rate = dev.sample_rate as f64;
-                let rs = if (in_rate - p.ctx.daw_rate).abs() > 0.5 {
-                    Some(StreamResampler::with_phase(in_rate, p.ctx.daw_rate, 1024, ResamplerPhase::Minimum))
-                } else {
-                    None
-                };
-                let rs_in_lat = rs.as_ref().map(|r| r.latency_input_frames()).unwrap_or(0);
+                // Always resample (even 1:1): the ratio is trimmed live to
+                // follow the capture clock.
+                let rs = StreamResampler::with_phase(in_rate, p.ctx.daw_rate, 1024, ResamplerPhase::Minimum);
+                let rs_in_lat = rs.latency_input_frames();
                 let period_daw = ((dev.period_frames as f64) * p.ctx.daw_rate / in_rate).ceil() as usize;
                 let hr = dev.start();
                 if hr != 0 {
@@ -952,6 +1001,9 @@ unsafe fn open_io(p: &mut Pump, engine: Engine, old: Option<Io>) -> Io {
                 } else {
                     p.input = Some(InputChain {
                         rs,
+                        drift: None,
+                        in_rate,
+                        daw_rate: p.ctx.daw_rate,
                         scratch_l: Vec::with_capacity(SCRATCH),
                         scratch_r: Vec::with_capacity(SCRATCH),
                         fifo: VecDeque::with_capacity(SCRATCH * 2),
@@ -1037,7 +1089,11 @@ unsafe fn pump(ctx: PumpCtx) {
         SetThreadPriority(GetCurrentThread(), 15 /* TIME_CRITICAL */);
     }
     disable_power_throttling(GetCurrentThread());
-    timeBeginPeriod(1);
+    // Per-thread high-resolution timer (falls back to timeBeginPeriod(1)
+    // internally on Windows older than 10 1803). The device path itself is
+    // event driven; this serves the timer clock and recovery waits.
+    let timer = crate::hrtimer::HrTimer::new();
+    log_debug(&format!("Pump timer: {}", if timer.is_high_resolution() { "per-thread high resolution" } else { "legacy timeBeginPeriod(1)" }));
     let old_csr = enable_ftz_daz();
 
     let block_secs = ctx.block as f64 / ctx.daw_rate;
@@ -1105,7 +1161,7 @@ unsafe fn pump(ctx: PumpCtx) {
             + if io.exclusive { to_daw(io.period * 2) } else { to_daw(io.target) }
             + io.rs_lat;
         let in_lat = p.ctx.block as u32
-            + p.input.as_ref().map(|i| (i.cushion + i.rs_lat) as u32).unwrap_or(0);
+            + p.input.as_ref().map(|i| (i.cushion + i.period_daw / 2 + i.rs_lat) as u32).unwrap_or(0);
         if out_lat != reported_out || in_lat != reported_in {
             let now = qpc();
             let grew = out_lat > reported_out || in_lat > reported_in;
@@ -1185,7 +1241,7 @@ unsafe fn pump(ctx: PumpCtx) {
                             // endpoint vanished / format changed: reopen (default device if needed)
                         }
                         reopen = true;
-                        Sleep(5);
+                        timer.sleep_ms(5);
                         continue;
                     }
                 };
@@ -1242,8 +1298,10 @@ unsafe fn pump(ctx: PumpCtx) {
                     if now >= timer_next || !p.ctx.running.load(Ordering::Relaxed) {
                         break;
                     }
-                    if timer_next - now > 0.002 * freq as f64 {
-                        Sleep(1);
+                    let left = timer_next - now;
+                    if left > 0.0015 * freq as f64 {
+                        // wake ~0.7 ms early, spin the rest
+                        timer.sleep_us(((left / freq as f64) * 1e6) as u64 - 700);
                     } else {
                         core::hint::spin_loop();
                     }
@@ -1291,6 +1349,6 @@ unsafe fn pump(ctx: PumpCtx) {
     }
     restore_csr(old_csr);
     drop(mmcss);
-    timeEndPeriod(1);
+    drop(timer);
     log_debug(&format!("Pump stopped after {} samples", p.position));
 }

@@ -4,14 +4,14 @@ version = 4
 
 [[package]]
 name = "audio-asio"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "audio-core",
 ]
 
 [[package]]
 name = "audio-bench"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "audio-asio",
  "audio-core",
@@ -20,7 +20,7 @@ dependencies = [
 
 [[package]]
 name = "audio-control"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "audio-asio",
  "audio-core",
@@ -29,18 +29,18 @@ dependencies = [
 
 [[package]]
 name = "audio-core"
-version = "2.1.0"
+version = "2.2.0"
 
 [[package]]
 name = "audio-kernel"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "audio-core",
 ]
 
 [[package]]
 name = "audio-native"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "audio-core",
 ]

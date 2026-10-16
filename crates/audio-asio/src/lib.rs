@@ -8,6 +8,7 @@ pub mod com_interface;
 pub mod registry;
 pub mod wasapi;
 pub mod live_status;
+pub mod hrtimer;
 
 use core::ffi::c_void;
 use std::sync::atomic::{AtomicPtr, Ordering};

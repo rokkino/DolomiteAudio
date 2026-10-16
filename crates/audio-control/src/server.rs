@@ -232,12 +232,15 @@ fn snapshot_json(s: &LiveStatus, is_kernel: bool, host: &mut HostName) -> String
     }
     let v3 = ld(&s.version) >= 3;
     let v3u = |a: &std::sync::atomic::AtomicU32| if v3 { a.load(Ordering::Relaxed) } else { 0 };
+    let v4 = ld(&s.version) >= 4;
+    let adaptive = if v4 { ld(&s.input_adaptive) } else { 0 };
+    let drift_ppm = if v4 { ld(&s.input_drift_ppb) as i32 as f64 / 1000.0 } else { 0.0 };
     format!(
         concat!(
             "{{\"alive\":{},\"kernel\":{},\"host\":\"{}\",\"device\":\"{}\",\"mode\":{},",
             "\"daw_rate\":{},\"device_rate\":{},\"buffer\":{},\"period\":{},\"queue\":{},",
             "\"out_latency\":{},\"in_latency\":{},\"resampling\":{},\"rs_latency\":{},",
-            "\"in_mode\":{},\"in_device\":\"{}\",\"in_rate\":{},\"in_underruns\":{},\"auto_state\":{},\"switches\":{},",
+            "\"in_mode\":{},\"in_device\":\"{}\",\"in_rate\":{},\"in_underruns\":{},\"auto_state\":{},\"switches\":{},\"adaptive\":{},\"drift_ppm\":{:.2},",
             "\"callbacks\":{},\"underruns\":{},\"late\":{},\"load\":{},\"load_peak\":{},",
             "\"peak\":[{:.5},{:.5},{:.5},{:.5}],\"rms\":[{:.5},{:.5},{:.5},{:.5}],\"clip\":[{},{},{},{}]}}"
         ),
@@ -261,6 +264,8 @@ fn snapshot_json(s: &LiveStatus, is_kernel: bool, host: &mut HostName) -> String
         v3u(&s.input_underruns),
         v3u(&s.auto_state),
         v3u(&s.engine_switches),
+        adaptive,
+        drift_ppm,
         s.callbacks.load(Ordering::Relaxed),
         ld(&s.underruns),
         ld(&s.late_wakeups),

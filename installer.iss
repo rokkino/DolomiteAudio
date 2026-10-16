@@ -3,7 +3,7 @@
 ; certificates, nothing outside {app} except the ASIO / COM registration.
 
 #ifndef MyAppVersion
-  #define MyAppVersion "2.1.0"
+  #define MyAppVersion "2.2.0"
 #endif
 #define MyAppName "DolomiteAudioRT"
 #define MyClsid "{{3E8C1234-A789-4B56-9DEF-0123456789AB}"

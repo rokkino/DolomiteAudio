@@ -97,7 +97,9 @@ pub const INDEX_HTML: &str = r##"<!DOCTYPE html>
   .db { font: 500 11.5px var(--num); font-variant-numeric: tabular-nums; text-align: right; color: var(--muted); }
 
   /* ---------- stats ---------- */
-  .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .stats { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; }
+  .stat[hidden] { display: none; }
+  .stat b, .stat span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .stat { background: var(--well); border-radius: 8px; padding: 7px 9px; }
   .stat b { display: block; font: 500 15px var(--num); font-variant-numeric: tabular-nums; }
   .stat span { color: var(--muted); font-size: 11px; }
@@ -203,9 +205,10 @@ pub const INDEX_HTML: &str = r##"<!DOCTYPE html>
   </section>
 
   <section class="stats live" style="margin-bottom:8px">
-    <div class="stat"><b id="stLoad">–</b><span>Carico driver</span></div>
+    <div class="stat"><b id="stLoad">–</b><span>Carico</span></div>
     <div class="stat" id="stUnderWrap"><b id="stUnder">0</b><span>Dropout</span></div>
     <div class="stat"><b id="stRate">–</b><span id="stRateCap">Frequenza</span></div>
+    <div class="stat" id="stSyncWrap" hidden title="Ingresso e uscita hanno orologi diversi: il driver adatta di continuo la conversione, senza scartare campioni."><b id="stSync">–</b><span id="stSyncCap">Sync in</span></div>
   </section>
 
   <details id="dEngine">
@@ -412,6 +415,11 @@ function render(s) {
     $('stLoad').style.color = load > 80 ? 'var(--hot)' : load > 60 ? 'var(--warn)' : '';
     $('stUnder').textContent = s.underruns + (s.in_underruns ? ' / ' + s.in_underruns : '');
     $('stUnderWrap').classList.toggle('alert', s.underruns > 0);
+    $('stSyncWrap').hidden = !(s.in_mode && s.adaptive);
+    if (s.adaptive) {
+      const p = s.drift_ppm;
+      $('stSync').textContent = s.adaptive === 2 ? (p >= 0 ? '+' : '') + (Math.abs(p) < 10 ? p.toFixed(1) : p.toFixed(0)) + ' ppm' : 'aggancio…';
+    }
 
     const a = AUTO[s.auto_state];
     $('auto').hidden = !a;

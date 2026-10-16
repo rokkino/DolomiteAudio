@@ -9,7 +9,7 @@ use core::ffi::c_void;
 use core::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 pub const LIVE_MAGIC: u32 = 0x444F_4C4D; // 'DOLM'
-pub const LIVE_VERSION: u32 = 3;
+pub const LIVE_VERSION: u32 = 4;
 const MAPPING_NAME: &str = "Local\\DolomiteAudioLive";
 
 #[repr(C)]
@@ -60,6 +60,12 @@ pub struct LiveStatus {
     /// Number of live engine switches since start
     pub engine_switches: AtomicU32,
     pub input_device_name: [AtomicU32; 32],
+
+    // ---- v4 ----
+    /// Adaptive input resampling: 0 off, 1 locking, 2 locked
+    pub input_adaptive: AtomicU32,
+    /// Measured input-vs-output clock offset, parts per billion (i32 bits)
+    pub input_drift_ppb: AtomicU32,
 }
 
 impl LiveStatus {

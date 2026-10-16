@@ -1,3 +1,21 @@
+## DolomiteAudioRT 2.2 — adaptive input clock sync, per-thread high-resolution timer
+
+**Download:** `DolomiteAudioRT-Setup-*.exe` below → run it → in your DAW's audio settings pick **DolomiteAudioRT** as the ASIO device (Studio One, Cubase, Reaper, Ableton Live, FL Studio, Bitwig…). The panel lives in the tray icon next to the clock.
+
+### New
+- **Adaptive resampling on the inputs** (F. Adriaensen, *Controlling adaptive resampling*, LAC 2012). The capture device always runs on its own clock, and a USB mic or a second card can drift by tens of ppm. Until 2.1 the driver dropped samples now and then to catch up. Now the conversion ratio is servo-controlled by a 2nd-order loop:
+  - nothing is ever dropped or repeated, and input latency stays constant;
+  - the FIFO level is time-corrected using the device's capture timestamps, so the loop sees no sawtooth;
+  - the loop locks in a few seconds (1 Hz bandwidth) and then narrows to 0.05 Hz.
+  
+  In a simulation with a 120 ppm offset it estimates the drift to within 0.01 ppm, and a 1 kHz sine stays at THD+N ≈ −101 dB in every 100 ms window. The panel shows the measured offset as **Sync in**.
+- **Per-thread high-resolution timer** (`CREATE_WAITABLE_TIMER_HIGH_RESOLUTION`). It replaces the global `timeBeginPeriod(1)`, which costs power system-wide and which Windows 11 ignores while the DAW window is minimised. The auto-exclusive watcher now ticks every 20 ms and stays precise in the background, as does the timer clock used when no sound card is available. Windows versions without it automatically use the old method.
+
+### Fixed
+- **Sample-rate converter, near 1:1 ratios**: the first coefficient of the minimum-phase filter carried an artefact from the cepstral transform. It caused a tiny gain step (0.1 %) once per fractional cycle, which is audible as modulation when the ratio sits very close to 1 (≈ −89 dB → −98 dB worst case). All polyphase rows are now checked for consistency in the tests.
+
+---
+
 ## DolomiteAudioRT 2.1 — exclusive input, auto-release, tray panel
 
 **Download:** `DolomiteAudioRT-Setup-*.exe` below → run it → in your DAW's audio settings pick **DolomiteAudioRT** as the ASIO device (Studio One, Cubase, Reaper, Ableton Live, FL Studio, Bitwig…). The panel lives in the tray icon next to the clock.

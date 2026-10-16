@@ -43,6 +43,7 @@ pub enum Phase {
 
 pub struct StreamResampler {
     step: f64,       // input frames advanced per output frame (in_rate / out_rate)
+    nominal_step: f64,
     pos: f64,        // position of next output, in input-buffer index units
     lookahead: usize, // input frames needed after floor(pos)
     latency: f64,    // group delay at DC, in input frames
@@ -136,6 +137,14 @@ fn minimum_phase(h: &[f64]) -> Vec<f64> {
     }
     fft(&mut re, &mut im, true);
     re.truncate(h.len());
+    // The cepstral method leaves an artefact on the very first sample (it
+    // carries the aliased DC of the log spectrum). On the fine polyphase
+    // grid that sample is only ever used by phase row 0, so a slowly
+    // sweeping fractional position (ratio near 1:1) would hit a 0.1 % gain
+    // step once per cycle. Replace it by extrapolating the smooth onset.
+    if re.len() > 3 {
+        re[0] = 2.0 * re[1] - re[2];
+    }
     re
 }
 
@@ -241,9 +250,13 @@ impl StreamResampler {
                     vals[k] = v;
                     sum += v;
                 }
-                let _ = sum;
+                // Min-phase rows come out of the cepstral transform with
+                // slightly different DC gains; when the fractional position
+                // sweeps slowly (ratio near 1:1, adaptive resampling) that
+                // would modulate the level. Normalise each row to unity.
+                let g = gain; let _ = sum;
                 for k in 0..TAPS {
-                    row[k] = (vals[k] * gain) as f32;
+                    row[k] = (vals[k] * g) as f32;
                 }
             }
             (table, latency)
@@ -256,7 +269,29 @@ impl StreamResampler {
         hist_l.resize(pad, 0.0);
         hist_r.resize(pad, 0.0);
 
-        Self { step, pos: pad as f64, lookahead, latency, hist_l, hist_r, table, phases }
+        Self { step, nominal_step: step, pos: pad as f64, lookahead, latency, hist_l, hist_r, table, phases }
+    }
+
+    /// Adaptive resampling: scale the output/input ratio by `corr`
+    /// (from [`crate::DriftLoop`]). `corr < 1` consumes input faster.
+    #[inline]
+    pub fn set_ratio_correction(&mut self, corr: f64) {
+        self.step = self.nominal_step / corr;
+    }
+
+    /// Fractional input frames between the newest input sample and the next
+    /// output position (in (-step, lookahead]). Added to the output FIFO
+    /// length (times `ratio()`) it makes the delay measurement continuous
+    /// instead of jumping by one frame every output sample.
+    #[inline]
+    pub fn pending_input_frames(&self) -> f64 {
+        self.hist_l.len() as f64 - self.pos
+    }
+
+    /// Output frames produced per input frame right now.
+    #[inline]
+    pub fn ratio(&self) -> f64 {
+        1.0 / self.step
     }
 
     /// Group delay of the filter, in input frames (rounded up).
@@ -410,5 +445,111 @@ mod tests {
         let rs = StreamResampler::with_phase(44100.0, 48000.0, 256, Phase::Minimum);
         assert!(rs.latency_input_frames() <= 5, "latency {}", rs.latency_input_frames());
         println!("min-phase latency = {:.2} frames", rs.latency);
+    }
+
+    /// Two devices on independent clocks: the capture device runs 120 ppm
+    /// fast and delivers 480-frame packets, the DAW pulls 128-frame blocks.
+    /// The adaptive loop must hold the FIFO without a single drop/repeat and
+    /// the signal must stay clean (no clicks, no audible modulation).
+    #[test]
+    fn adaptive_tracks_clock_drift_cleanly() {
+        use crate::DriftLoop;
+        let rate = 48000.0;
+        let ppm = 120.0;
+        let prod_rate = rate * (1.0 + ppm * 1e-6);
+        let (period, block) = (480usize, 128usize);
+        let freq = 997.0;
+        let mut rs = StreamResampler::with_phase(rate, rate, 1024, Phase::Minimum);
+        let target = (block + period + period / 2) as f64;
+        let mut lp = DriftLoop::new(target, block, rate);
+        let mut fifo: std::collections::VecDeque<f32> = std::collections::VecDeque::new();
+        // pre-fill like the driver's priming
+        for _ in 0..(target as usize) { fifo.push_back(0.0); }
+        let mut out = Vec::new();
+        let (mut t, mut next_pkt, mut last_end, mut n) = (0.0f64, 0.0f64, 0.0f64, 0usize);
+        let mut buf = vec![0.0f32; period];
+        let secs = 60.0;
+        let mut min_fill = usize::MAX;
+        while t < secs {
+            while next_pkt <= t {
+                for i in 0..period {
+                    buf[i] = (0.5 * (2.0 * core::f64::consts::PI * freq * (n + i) as f64 / prod_rate).sin()) as f32;
+                }
+                n += period;
+                rs.process(&buf, &buf, |a, _| fifo.push_back(a));
+                last_end = next_pkt;
+                next_pkt += period as f64 / prod_rate;
+            }
+            let delay = fifo.len() as f64 + rs.pending_input_frames() * rs.ratio() + (t - last_end) * rate;
+            let corr = lp.update(delay);
+            rs.set_ratio_correction(corr);
+            min_fill = min_fill.min(fifo.len());
+            assert!(fifo.len() >= block, "underrun at t={t:.2}s fill {}", fifo.len());
+            for _ in 0..block {
+                out.push(fifo.pop_front().unwrap());
+            }
+            t += block as f64 / rate;
+        }
+        let est = lp.drift_ppm();
+        assert!((est - ppm).abs() < 3.0, "drift estimate {est} ppm");
+        // steady state: last 30 s, fitted against the true 997 Hz at 48 kHz
+        // Per 100 ms window (thd_db analyses the middle half of each), so
+        // very slow phase wander -- the loop following the clock, inaudible --
+        // is not counted as distortion, but any click or fast modulation is.
+        let tail = &out[out.len() / 2..];
+        let mut thd = f64::MIN;
+        for w in tail.chunks_exact(9600) {
+            thd = thd.max(thd_db(w, rate, freq));
+        }
+        eprintln!("adaptive: est {est:.2} ppm, min fifo {min_fill}, THD+N {thd:.1} dB");
+        assert!(thd < -95.0, "THD+N {thd} dB");
+    }
+
+    /// Ratio within a few hundred ppm of 1:1: the fractional position sweeps
+    /// very slowly, so any per-phase gain error becomes audible modulation.
+    #[test]
+    fn near_unity_ratio_is_clean() {
+        for ph in [Phase::Minimum, Phase::Linear] {
+            let r = 48000.0 * (1.0 + 120e-6);
+            let out = run_p(r, 48000.0, 480, 6.0, 997.0, ph);
+            let mut worst = f64::MIN;
+            for w in out[out.len() / 2..].chunks_exact(9600) {
+                worst = worst.max(thd_db(w, 48000.0, 997.0));
+            }
+            assert!(worst < -95.0, "{ph:?}: worst window {worst:.1} dB");
+        }
+    }
+
+    #[test]
+    /// Every polyphase row must have the same gain/delay (no row-0 artefact).
+    fn polyphase_rows_are_consistent() {
+        for ph in [Phase::Minimum, Phase::Linear] {
+            let rs = StreamResampler::with_phase(48000.0, 48000.0 * 0.9999, 256, ph);
+            let back = (TAPS - 1 - rs.lookahead) as f64;
+            let w = 2.0 * core::f64::consts::PI * 997.0 / 48000.0;
+            let mut res = vec![];
+            for p in 0..=rs.phases {
+                let row = &rs.table[p * TAPS..(p + 1) * TAPS];
+                let (mut re, mut im, mut dc) = (0.0, 0.0, 0.0);
+                for k in 0..TAPS {
+                    // tap k multiplies input at distance d = p/P + back - k
+                    let d = p as f64 / rs.phases as f64 + back - k as f64;
+                    re += row[k] as f64 * (w * d).cos();
+                    im -= row[k] as f64 * (w * d).sin();
+                    dc += row[k] as f64;
+                }
+                let g = (re * re + im * im).sqrt();
+                let delay = -im.atan2(re) / w; // seconds-equivalent in frames, relative to output point
+                res.push((p, g, delay, dc));
+            }
+            let gm: f64 = res.iter().map(|r| r.1).sum::<f64>() / res.len() as f64;
+            let dm: f64 = res.iter().map(|r| r.2).sum::<f64>() / res.len() as f64;
+            let gdev = res.iter().map(|r| ((r.1 / gm - 1.0).abs(), r.0)).fold((0.0, 0), |a, b| if b.0 > a.0 { b } else { a });
+            let ddev = res.iter().map(|r| ((r.2 - dm).abs(), r.0)).fold((0.0, 0), |a, b| if b.0 > a.0 { b } else { a });
+            let dcdev = res.iter().map(|r| (r.3 - 1.0).abs()).fold(0.0, f64::max);
+            assert!(gdev.0 < 1e-4, "{ph:?}: row gain deviation {:.2e} at row {}", gdev.0, gdev.1);
+            assert!(ddev.0 < 1e-3, "{ph:?}: row delay deviation {:.2e} at row {}", ddev.0, ddev.1);
+            let _ = dcdev;
+        }
     }
 }

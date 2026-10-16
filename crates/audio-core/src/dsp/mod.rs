@@ -17,3 +17,7 @@ pub use clock_servo::*;
 pub mod stream_resampler;
 #[cfg(feature = "std")]
 pub use stream_resampler::{Phase as ResamplerPhase, StreamResampler};
+#[cfg(feature = "std")]
+pub mod drift_loop;
+#[cfg(feature = "std")]
+pub use drift_loop::DriftLoop;

@@ -26,6 +26,8 @@
 
 **Auto-exclusive (default with *Exclusive*)**: the driver holds the sound card exclusively only while your DAW is in front. Switch to another program, or let another app play audio, and it drops to shared mode within ~150 ms so everything is audible; come back to the DAW and it re-takes exclusive mode after ~1 s of quiet. No DAW restart, no reset.
 
+**Adaptive input sync (2.2)**: the input device runs on its own clock (a USB mic or a second card drifts by tens of ppm). The driver trims the input conversion ratio continuously with a 2nd-order control loop (Adriaensen, LAC 2012) instead of dropping samples, so input latency is constant and nothing is ever cut. The panel shows the measured offset as *Sync in*.
+
 **Tray panel**: a small icon next to the clock. Left click opens a compact panel (latency, meters, engine, buffer, devices); click anywhere else and it hides. Right click: test sound, *Start with Windows*, exit.
 
 Run `asio_selftest.exe --list` (installed next to the driver) to see your devices; `--engine auto|exclusive|low|shared` to test an engine.

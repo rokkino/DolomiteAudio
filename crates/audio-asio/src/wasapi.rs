@@ -957,6 +957,10 @@ pub struct WasapiCapture {
     pub low_latency: bool,
     pub name: String,
     _own_format: Vec<u8>,
+    /// QPC time (100 ns units) at which the last captured frame was sampled
+    /// by the device; 0 = unknown. Time-corrects the FIFO level for the
+    /// adaptive resampling loop.
+    pub last_frame_100ns: u64,
 }
 
 unsafe impl Send for WasapiCapture {}
@@ -1008,6 +1012,7 @@ impl WasapiCapture {
             low_latency: true,
             name: name.to_string(),
             _own_format: x.wfx,
+            last_frame_100ns: 0,
         })
     }
 
@@ -1090,6 +1095,7 @@ impl WasapiCapture {
             low_latency,
             name: name.to_string(),
             _own_format: Vec::new(),
+            last_frame_100ns: 0,
         })
     }
 
@@ -1142,6 +1148,13 @@ impl WasapiCapture {
                     right.push(r);
                 }
                 let _ = (vt.release_buffer)(self.capture_client, n);
+                // qpc_pos = when the packet's first frame was captured.
+                // flag 0x4 = AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR
+                self.last_frame_100ns = if qpc_pos != 0 && flags & 0x4 == 0 {
+                    qpc_pos + (n as u64).saturating_sub(1) * 10_000_000 / self.sample_rate.max(1) as u64
+                } else {
+                    0
+                };
                 total += n as usize;
             }
         }

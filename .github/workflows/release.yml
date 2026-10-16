@@ -25,7 +25,7 @@ jobs:
           Get-ChildItem target\release\*.dll, target\release\*.exe
 
       - name: Unit tests (resampler)
-        run: cargo test --release -p audio-core stream_resampler
+        run: cargo test --release -p audio-core
 
       - name: Install Inno Setup if missing
         shell: pwsh
